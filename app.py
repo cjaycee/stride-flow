@@ -383,7 +383,7 @@ with col1:
     )
 
 # Vertical bounce
-vb    = v.vertical_bounce_pct if v else 0.0
+vb    = v.range_pct if v else 0.0
 vb_b, vb_c = bounce_badge(vb)
 with col2:
     st.markdown(
