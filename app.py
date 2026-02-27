@@ -486,7 +486,7 @@ if os.path.isfile(report_path):
 # ══════════════════════════════════════════════════════════════════════════════
 
 import plotly.graph_objects as go
-from analyzer import _col as _header_col, _angle_between_three_points, _moving_avg
+from analyzer import _col as _header_col, _angle_between_three_points, _smooth as _moving_avg
 
 st.markdown("<div class='section-heading'>📈 Metric Charts</div>",
             unsafe_allow_html=True)
