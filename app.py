@@ -479,3 +479,264 @@ if os.path.isfile(report_path):
                 mime="text/plain",
                 use_container_width=True,
             )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Interactive charts  (Plotly)
+# ══════════════════════════════════════════════════════════════════════════════
+
+import plotly.graph_objects as go
+from analyzer import _col as _header_col, _angle_between_three_points, _moving_avg
+
+st.markdown("<div class='section-heading'>📈 Metric Charts</div>",
+            unsafe_allow_html=True)
+
+# ── Shared Plotly dark theme ──────────────────────────────────────────────────
+CHART_LAYOUT = dict(
+    paper_bgcolor="#0e1117",
+    plot_bgcolor="#161b22",
+    font=dict(color="#8b949e", family="monospace"),
+    xaxis=dict(
+        gridcolor="#21262d", zerolinecolor="#21262d",
+        title_font=dict(color="#8b949e"),
+    ),
+    yaxis=dict(
+        gridcolor="#21262d", zerolinecolor="#21262d",
+        title_font=dict(color="#8b949e"),
+    ),
+    legend=dict(
+        bgcolor="#1c2230", bordercolor="#21262d", borderwidth=1,
+        font=dict(color="#c9d1d9"),
+    ),
+    margin=dict(l=48, r=24, t=40, b=48),
+    hovermode="x unified",
+)
+
+tab1, tab2, tab3 = st.tabs(["🦵 Knee Angles", "👣 Step Detection", "↕ Hip Oscillation"])
+
+
+# ─── Tab 1: Knee angle over time ─────────────────────────────────────────────
+with tab1:
+    try:
+        ts_col = _header_col(header, "timestamp_s")
+
+        lh_xi = _header_col(header, "left_hip_x")
+        lh_yi = _header_col(header, "left_hip_y")
+        lh_zi = _header_col(header, "left_hip_z")
+        lk_xi = _header_col(header, "left_knee_x")
+        lk_yi = _header_col(header, "left_knee_y")
+        lk_zi = _header_col(header, "left_knee_z")
+        la_xi = _header_col(header, "left_ankle_x")
+        la_yi = _header_col(header, "left_ankle_y")
+        la_zi = _header_col(header, "left_ankle_z")
+
+        rh_xi = _header_col(header, "right_hip_x")
+        rh_yi = _header_col(header, "right_hip_y")
+        rh_zi = _header_col(header, "right_hip_z")
+        rk_xi = _header_col(header, "right_knee_x")
+        rk_yi = _header_col(header, "right_knee_y")
+        rk_zi = _header_col(header, "right_knee_z")
+        ra_xi = _header_col(header, "right_ankle_x")
+        ra_yi = _header_col(header, "right_ankle_y")
+        ra_zi = _header_col(header, "right_ankle_z")
+
+        timestamps    = data[:, ts_col]
+        left_hip_xyz  = data[:, [lh_xi, lh_yi, lh_zi]]
+        left_knee_xyz = data[:, [lk_xi, lk_yi, lk_zi]]
+        left_ank_xyz  = data[:, [la_xi, la_yi, la_zi]]
+        rght_hip_xyz  = data[:, [rh_xi, rh_yi, rh_zi]]
+        rght_knee_xyz = data[:, [rk_xi, rk_yi, rk_zi]]
+        rght_ank_xyz  = data[:, [ra_xi, ra_yi, ra_zi]]
+
+        l_angles = _angle_between_three_points(left_hip_xyz, left_knee_xyz, left_ank_xyz)
+        r_angles = _angle_between_three_points(rght_hip_xyz, rght_knee_xyz, rght_ank_xyz)
+
+        # Smooth for display
+        l_smooth = _moving_avg(np.where(np.isnan(l_angles), 0, l_angles), w=9)
+        r_smooth = _moving_avg(np.where(np.isnan(r_angles), 0, r_angles), w=9)
+
+        fig1 = go.Figure()
+        fig1.add_trace(go.Scatter(
+            x=timestamps, y=l_smooth,
+            name="Left Knee",
+            line=dict(color="#3fb950", width=2),
+            hovertemplate="Left: %{y:.1f}°<extra></extra>",
+        ))
+        fig1.add_trace(go.Scatter(
+            x=timestamps, y=r_smooth,
+            name="Right Knee",
+            line=dict(color="#58a6ff", width=2),
+            hovertemplate="Right: %{y:.1f}°<extra></extra>",
+        ))
+        # Overstride warning band
+        fig1.add_hrect(
+            y0=170, y1=185,
+            fillcolor="rgba(218,54,51,0.12)",
+            line_width=0,
+            annotation_text="⚠ Overstride zone",
+            annotation_font=dict(color="#f85149", size=11),
+            annotation_position="top left",
+        )
+        fig1.update_layout(
+            **CHART_LAYOUT,
+            title=dict(text="Knee Angle over Time", font=dict(color="#e6edf3", size=14)),
+            xaxis_title="Time (s)",
+            yaxis_title="Angle (°)",
+            yaxis=dict(range=[50, 190], **CHART_LAYOUT["yaxis"]),
+        )
+        st.plotly_chart(fig1, use_container_width=True)
+    except Exception as e:
+        st.warning(f"Could not render knee angle chart: {e}")
+
+
+# ─── Tab 2: Ankle-Y step detection ───────────────────────────────────────────
+with tab2:
+    try:
+        ts_col  = _header_col(header, "timestamp_s")
+        la_yi   = _header_col(header, "left_ankle_y")
+        ra_yi   = _header_col(header, "right_ankle_y")
+        la_vi   = _header_col(header, "left_ankle_visibility")
+        ra_vi   = _header_col(header, "right_ankle_visibility")
+
+        timestamps = data[:, ts_col]
+        l_ank_y    = data[:, la_yi].copy()
+        r_ank_y    = data[:, ra_yi].copy()
+        l_vis      = data[:, la_vi]
+        r_vis      = data[:, ra_vi]
+
+        # visibility-mask → interpolate
+        for arr, vis in [(l_ank_y, l_vis), (r_ank_y, r_vis)]:
+            bad = (vis < 0.5) | np.isnan(arr)
+            if not bad.all():
+                x_all  = np.arange(len(arr))
+                x_good = x_all[~bad]
+                y_good = arr[~bad]
+                arr[bad] = np.interp(x_all[bad], x_good, y_good)
+
+        l_smooth = _moving_avg(l_ank_y, w=7)
+        r_smooth = _moving_avg(r_ank_y, w=7)
+
+        # Recover peak frame indices from analyzer results
+        l_peak_idx = c.left_peaks  if c else np.array([], dtype=int)
+        r_peak_idx = c.right_peaks if c else np.array([], dtype=int)
+
+        fig2 = go.Figure()
+        fig2.add_trace(go.Scatter(
+            x=timestamps, y=l_smooth,
+            name="Left Ankle Y",
+            line=dict(color="#3fb950", width=1.5),
+            hovertemplate="Left Y: %{y:.3f}<extra></extra>",
+        ))
+        fig2.add_trace(go.Scatter(
+            x=timestamps, y=r_smooth,
+            name="Right Ankle Y",
+            line=dict(color="#58a6ff", width=1.5),
+            hovertemplate="Right Y: %{y:.3f}<extra></extra>",
+        ))
+
+        # Peak markers
+        if len(l_peak_idx):
+            fig2.add_trace(go.Scatter(
+                x=timestamps[l_peak_idx],
+                y=l_smooth[l_peak_idx],
+                mode="markers",
+                name="Left foot-strike",
+                marker=dict(color="#3fb950", size=9, symbol="triangle-down",
+                            line=dict(color="#ffffff", width=1)),
+                hovertemplate="Foot-strike @ %{x:.2f}s<extra></extra>",
+            ))
+        if len(r_peak_idx):
+            fig2.add_trace(go.Scatter(
+                x=timestamps[r_peak_idx],
+                y=r_smooth[r_peak_idx],
+                mode="markers",
+                name="Right foot-strike",
+                marker=dict(color="#58a6ff", size=9, symbol="triangle-down",
+                            line=dict(color="#ffffff", width=1)),
+                hovertemplate="Foot-strike @ %{x:.2f}s<extra></extra>",
+            ))
+
+        fig2.update_layout(
+            **CHART_LAYOUT,
+            title=dict(
+                text=f"Ankle-Y Step Detection  —  Cadence: {c.cadence_spm:.0f} SPM" if c
+                     else "Ankle-Y Step Detection",
+                font=dict(color="#e6edf3", size=14),
+            ),
+            xaxis_title="Time (s)",
+            yaxis_title="Ankle Y (normalised, 0=top)",
+            yaxis=dict(autorange="reversed", **CHART_LAYOUT["yaxis"]),
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+    except Exception as e:
+        st.warning(f"Could not render step detection chart: {e}")
+
+
+# ─── Tab 3: Mid-hip vertical oscillation ─────────────────────────────────────
+with tab3:
+    try:
+        ts_col  = _header_col(header, "timestamp_s")
+        lhy_i   = _header_col(header, "left_hip_y")
+        rhy_i   = _header_col(header, "right_hip_y")
+        lhv_i   = _header_col(header, "left_hip_visibility")
+        rhv_i   = _header_col(header, "right_hip_visibility")
+
+        timestamps   = data[:, ts_col]
+        mid_hip_y_raw = (data[:, lhy_i] + data[:, rhy_i]) / 2.0
+        valid_mask   = (
+            (data[:, lhv_i] >= 0.5) & (data[:, rhv_i] >= 0.5)
+            & ~np.isnan(mid_hip_y_raw)
+        )
+
+        mid_hip_valid = mid_hip_y_raw.copy()
+        mid_hip_valid[~valid_mask] = np.nan
+        mid_smooth = _moving_avg(
+            np.where(np.isnan(mid_hip_valid), np.nanmean(mid_hip_valid), mid_hip_valid),
+            w=9,
+        )
+
+        # Compute rolling oscillation band (min / max in 60-frame window)
+        win = 60
+        rolling_max = np.full_like(mid_smooth, np.nan)
+        rolling_min = np.full_like(mid_smooth, np.nan)
+        for i in range(len(mid_smooth)):
+            s = max(0, i - win // 2)
+            e = min(len(mid_smooth), i + win // 2)
+            rolling_max[i] = np.nanmax(mid_smooth[s:e])
+            rolling_min[i] = np.nanmin(mid_smooth[s:e])
+
+        fig3 = go.Figure()
+
+        # Shaded band between rolling min/max
+        fig3.add_trace(go.Scatter(
+            x=np.concatenate([timestamps, timestamps[::-1]]),
+            y=np.concatenate([rolling_max, rolling_min[::-1]]),
+            fill="toself",
+            fillcolor="rgba(88,166,255,0.10)",
+            line=dict(color="rgba(0,0,0,0)"),
+            name="Oscillation band",
+            hoverinfo="skip",
+        ))
+        fig3.add_trace(go.Scatter(
+            x=timestamps, y=mid_smooth,
+            name="Mid-Hip Y",
+            line=dict(color="#d29922", width=2),
+            hovertemplate="Hip Y: %{y:.4f}<extra></extra>",
+        ))
+
+        osc_range = v.range_norm if v else 0.0
+        fig3.update_layout(
+            **CHART_LAYOUT,
+            title=dict(
+                text=f"Mid-Hip Vertical Oscillation  —  Range: {osc_range:.4f} units "
+                     f"({v.range_pct:.2f}% frame height)" if v
+                     else "Mid-Hip Vertical Oscillation",
+                font=dict(color="#e6edf3", size=14),
+            ),
+            xaxis_title="Time (s)",
+            yaxis_title="Mid-Hip Y (normalised, 0=top)",
+            yaxis=dict(autorange="reversed", **CHART_LAYOUT["yaxis"]),
+        )
+        st.plotly_chart(fig3, use_container_width=True)
+    except Exception as e:
+        st.warning(f"Could not render oscillation chart: {e}")
